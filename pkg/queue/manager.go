@@ -163,13 +163,13 @@ func (m *Manager) NotifyTopologyUpdateWatchers(oldTopology, newTopology *kueueal
 	}
 }
 
-func (m *Manager) AddOrUpdateCohort(ctx context.Context, cohort *kueuealpha.Cohort) {
+func (m *Manager) AddOrUpdateCohort(ctx context.Context, cohort *kueue.Cohort) {
 	m.Lock()
 	defer m.Unlock()
 	cohortName := kueue.CohortReference(cohort.Name)
 
 	m.hm.AddCohort(cohortName)
-	m.hm.UpdateCohortEdge(cohortName, cohort.Spec.Parent)
+	m.hm.UpdateCohortEdge(cohortName, cohort.Spec.ParentName)
 	if m.requeueWorkloadsCohort(ctx, m.hm.Cohort(cohortName)) {
 		m.Broadcast()
 	}
@@ -310,7 +310,7 @@ func (m *Manager) AddLocalQueue(ctx context.Context, q *kueue.LocalQueue) error 
 		return fmt.Errorf("listing workloads that match the queue: %w", err)
 	}
 	for _, w := range workloads.Items {
-		if workload.HasQuotaReservation(&w) {
+		if !workload.IsActive(&w) || workload.HasQuotaReservation(&w) {
 			continue
 		}
 		workload.AdjustResources(ctx, m.client, &w)
@@ -646,8 +646,7 @@ func (m *Manager) Heads(ctx context.Context) []workload.Info {
 }
 
 func (m *Manager) heads() []workload.Info {
-	var workloads []workload.Info
-	workloads = append(workloads, m.secondPassQueue.takeAllReady()...)
+	workloads := m.secondPassQueue.takeAllReady()
 	for cqName, cq := range m.hm.ClusterQueues() {
 		// Cache might be nil in tests, if cache is nil, we'll skip the check.
 		if m.statusChecker != nil && !m.statusChecker.ClusterQueueActive(cqName) {
@@ -790,6 +789,9 @@ func (m *Manager) DeleteSecondPassWithoutLock(w *kueue.Workload) {
 // delay.
 func (m *Manager) QueueSecondPassIfNeeded(ctx context.Context, w *kueue.Workload) bool {
 	if workload.NeedsSecondPass(w) {
+		log := ctrl.LoggerFrom(ctx)
+		log.V(3).Info("Workload pre-queued for second pass", "workload", workload.Key(w))
+		m.secondPassQueue.prequeue(w)
 		m.clock.AfterFunc(time.Second, func() {
 			m.queueSecondPass(ctx, w)
 		})
@@ -801,14 +803,11 @@ func (m *Manager) QueueSecondPassIfNeeded(ctx context.Context, w *kueue.Workload
 func (m *Manager) queueSecondPass(ctx context.Context, w *kueue.Workload) {
 	m.Lock()
 	defer m.Unlock()
-	m.queueSecondPassWithoutLock(ctx, w)
-}
 
-func (m *Manager) queueSecondPassWithoutLock(ctx context.Context, w *kueue.Workload) {
 	log := ctrl.LoggerFrom(ctx)
-	log.V(3).Info("Workload queued for second pass of scheduling", "workload", workload.Key(w))
-
 	wInfo := workload.NewInfo(w, m.workloadInfoOptions...)
-	m.secondPassQueue.offer(wInfo)
-	m.Broadcast()
+	if m.secondPassQueue.queue(wInfo) {
+		log.V(3).Info("Workload queued for second pass of scheduling", "workload", workload.Key(w))
+		m.Broadcast()
+	}
 }

@@ -46,11 +46,11 @@ import (
 )
 
 var (
-	ErrCohortNotFound      = errors.New("cohort not found")
-	ErrCohortHasCycle      = errors.New("cohort has a cycle")
-	ErrCqNotFound          = errors.New("cluster queue not found")
-	errQNotFound           = errors.New("queue not found")
-	errWorkloadNotAdmitted = errors.New("workload not admitted by a ClusterQueue")
+	ErrCohortNotFound           = errors.New("cohort not found")
+	ErrCohortHasCycle           = errors.New("cohort has a cycle")
+	ErrCqNotFound               = errors.New("cluster queue not found")
+	errQNotFound                = errors.New("queue not found")
+	errWorkloadNotQuotaReserved = errors.New("workload does not have quota reservation by a ClusterQueue")
 )
 
 const (
@@ -104,7 +104,7 @@ type Cache struct {
 	podsReadyCond sync.Cond
 
 	client              client.Client
-	assumedWorkloads    map[workload.WorkloadReference]kueue.ClusterQueueReference
+	assumedWorkloads    map[workload.Reference]kueue.ClusterQueueReference
 	resourceFlavors     map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
 	podsReadyTracking   bool
 	admissionChecks     map[kueue.AdmissionCheckReference]AdmissionCheck
@@ -123,7 +123,7 @@ func New(client client.Client, opts ...Option) *Cache {
 	}
 	c := &Cache{
 		client:              client,
-		assumedWorkloads:    make(map[workload.WorkloadReference]kueue.ClusterQueueReference),
+		assumedWorkloads:    make(map[workload.Reference]kueue.ClusterQueueReference),
 		resourceFlavors:     make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor),
 		admissionChecks:     make(map[kueue.AdmissionCheckReference]AdmissionCheck),
 		podsReadyTracking:   options.podsReadyTracking,
@@ -139,8 +139,8 @@ func New(client client.Client, opts ...Option) *Cache {
 func (c *Cache) newClusterQueue(log logr.Logger, cq *kueue.ClusterQueue) (*clusterQueue, error) {
 	cqImpl := &clusterQueue{
 		Name:                kueue.ClusterQueueReference(cq.Name),
-		Workloads:           make(map[workload.WorkloadReference]*workload.Info),
-		WorkloadsNotReady:   sets.New[workload.WorkloadReference](),
+		Workloads:           make(map[workload.Reference]*workload.Info),
+		WorkloadsNotReady:   sets.New[workload.Reference](),
 		localQueues:         make(map[queue.LocalQueueReference]*LocalQueue),
 		podsReadyTracking:   c.podsReadyTracking,
 		workloadInfoOptions: c.workloadInfoOptions,
@@ -148,7 +148,7 @@ func (c *Cache) newClusterQueue(log logr.Logger, cq *kueue.ClusterQueue) (*clust
 		resourceNode:        NewResourceNode(),
 		tasCache:            &c.tasCache,
 
-		workloadsNotAccountedForTAS: sets.New[workload.WorkloadReference](),
+		workloadsNotAccountedForTAS: sets.New[workload.Reference](),
 	}
 	c.hm.AddClusterQueue(cqImpl)
 	c.hm.UpdateClusterQueueEdge(kueue.ClusterQueueReference(cq.Name), cq.Spec.Cohort)
@@ -470,14 +470,14 @@ func (c *Cache) DeleteClusterQueue(cq *kueue.ClusterQueue) {
 	metrics.ClearCacheMetrics(cq.Name)
 }
 
-func (c *Cache) AddOrUpdateCohort(apiCohort *kueuealpha.Cohort) error {
+func (c *Cache) AddOrUpdateCohort(apiCohort *kueue.Cohort) error {
 	c.Lock()
 	defer c.Unlock()
 	cohortName := kueue.CohortReference(apiCohort.Name)
 	c.hm.AddCohort(cohortName)
 	cohort := c.hm.Cohort(cohortName)
 	oldParent := cohort.Parent()
-	c.hm.UpdateCohortEdge(cohortName, apiCohort.Spec.Parent)
+	c.hm.UpdateCohortEdge(cohortName, apiCohort.Spec.ParentName)
 	return cohort.updateCohort(apiCohort, oldParent)
 }
 
@@ -634,7 +634,7 @@ func (c *Cache) AssumeWorkload(log logr.Logger, w *kueue.Workload) error {
 	defer c.Unlock()
 
 	if !workload.HasQuotaReservation(w) {
-		return errWorkloadNotAdmitted
+		return errWorkloadNotQuotaReserved
 	}
 
 	k := workload.Key(w)
@@ -663,7 +663,7 @@ func (c *Cache) ForgetWorkload(log logr.Logger, w *kueue.Workload) error {
 	c.cleanupAssumedState(log, w)
 
 	if !workload.HasQuotaReservation(w) {
-		return errWorkloadNotAdmitted
+		return errWorkloadNotQuotaReserved
 	}
 
 	cq := c.hm.ClusterQueue(w.Status.Admission.ClusterQueue)
@@ -714,7 +714,7 @@ type CohortUsageStats struct {
 	WeightedShare int64
 }
 
-func (c *Cache) CohortStats(cohortObj *kueuealpha.Cohort) (*CohortUsageStats, error) {
+func (c *Cache) CohortStats(cohortObj *kueue.Cohort) (*CohortUsageStats, error) {
 	c.RLock()
 	defer c.RUnlock()
 

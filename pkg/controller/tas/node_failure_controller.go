@@ -32,6 +32,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -42,7 +43,6 @@ import (
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	clientutil "sigs.k8s.io/kueue/pkg/util/client"
-	utilnode "sigs.k8s.io/kueue/pkg/util/node"
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
@@ -70,7 +70,7 @@ func (r *nodeFailureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if nodeExists {
-		readyCondition := utilnode.GetNodeCondition(&node, corev1.NodeReady)
+		readyCondition := utiltas.GetNodeCondition(&node, corev1.NodeReady)
 		if readyCondition != nil {
 			if readyCondition.Status == corev1.ConditionTrue {
 				return ctrl.Result{}, nil
@@ -137,13 +137,16 @@ func newNodeFailureReconciler(client client.Client, recorder record.EventRecorde
 
 func (r *nodeFailureReconciler) SetupWithManager(mgr ctrl.Manager, cfg *config.Configuration) (string, error) {
 	return TASNodeFailureController, builder.ControllerManagedBy(mgr).
-		Named(TASNodeFailureController).
+		Named("tas_node_failure_controller").
 		WatchesRawSource(source.TypedKind(
 			mgr.GetCache(),
 			&corev1.Node{},
 			&handler.TypedEnqueueRequestForObject[*corev1.Node]{},
 			r,
 		)).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: mgr.GetControllerOptions().GroupKindConcurrency[corev1.SchemeGroupVersion.WithKind("Node").GroupKind().String()],
+		}).
 		Complete(r)
 }
 

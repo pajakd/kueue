@@ -37,8 +37,8 @@ import (
 type ClusterQueueSnapshot struct {
 	Name              kueue.ClusterQueueReference
 	ResourceGroups    []ResourceGroup
-	Workloads         map[workload.WorkloadReference]*workload.Info
-	WorkloadsNotReady sets.Set[workload.WorkloadReference]
+	Workloads         map[workload.Reference]*workload.Info
+	WorkloadsNotReady sets.Set[workload.Reference]
 	NamespaceSelector labels.Selector
 	Preemption        kueue.ClusterQueuePreemption
 	FairWeight        resource.Quantity
@@ -208,14 +208,20 @@ type WorkloadTASRequests map[kueue.ResourceFlavorReference]FlavorTASRequests
 
 func (c *ClusterQueueSnapshot) FindTopologyAssignmentsForWorkload(
 	tasRequestsByFlavor WorkloadTASRequests,
-	simulateEmpty bool, wl *kueue.Workload) TASAssignmentsResult {
+	options ...FindTopologyAssignmentsOption,
+) TASAssignmentsResult {
+	opts := &findTopologyAssignmentsOption{}
+	for _, option := range options {
+		option(opts)
+	}
+
 	result := make(TASAssignmentsResult)
 	for tasFlavor, flavorTASRequests := range tasRequestsByFlavor {
 		// We assume the `tasFlavor` is already in the snapshot as this was
 		// already checked earlier during flavor assignment, and the set of
 		// flavors is immutable in snapshot.
 		tasFlavorCache := c.TASFlavors[tasFlavor]
-		flvResult := tasFlavorCache.FindTopologyAssignmentsForFlavor(flavorTASRequests, simulateEmpty, wl)
+		flvResult := tasFlavorCache.FindTopologyAssignmentsForFlavor(flavorTASRequests, options...)
 		maps.Copy(result, flvResult)
 	}
 	return result

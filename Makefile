@@ -84,10 +84,10 @@ LD_FLAGS += -X '$(version_pkg).GitCommit=$(GIT_COMMIT)'
 
 # Update these variables when preparing a new release or a release branch.
 # Then run `make prepare-release-branch`
-RELEASE_VERSION=v0.12.2
+RELEASE_VERSION=v0.12.3
 RELEASE_BRANCH=main
-# Version used form Helm which is not using the leading "v"
-CHART_VERSION := $(shell echo $(RELEASE_VERSION) | cut -c2-)
+# Application version for Helm and npm (strips leading 'v' from RELEASE_VERSION)
+APP_VERSION := $(shell echo $(RELEASE_VERSION) | cut -c2-)
 
 .PHONY: all
 all: generate fmt vet build
@@ -130,7 +130,7 @@ update-helm: manifests yq yaml-processor
 	$(BIN_DIR)/yaml-processor -zap-log-level=$(YAML_PROCESSOR_LOG_LEVEL) hack/processing-plan.yaml
 
 .PHONY: generate
-generate: gomod-download generate-apiref generate-code generate-kueuectl-docs
+generate: gomod-download generate-apiref generate-code generate-kueuectl-docs generate-helm-docs
 
 .PHONY: generate-code
 generate-code: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations and client-go libraries.
@@ -178,6 +178,8 @@ helm-verify: helm helm-lint ## run helm template and detect any rendering failur
 	$(HELM) template charts/kueue --set enableKueueViz=true --set enableCertManager=true --set enablePrometheus=true > /dev/null
 # test added managedJobsNamespaceSelector option
 	$(HELM) template charts/kueue --set managerConfig.controllerManagerConfigYaml="managedJobsNamespaceSelector:\n  matchExpressions:\n    - key: kubernetes.io/metadata.name\n      operator: In\n      values: [ kube-system ]" > /dev/null
+# test priorityClassName option
+	$(HELM) template charts/kueue --set controllerManager.manager.priorityClassName="system-cluster-critical" > /dev/null
 
 # test
 .PHONY: helm-unit-test
@@ -204,7 +206,7 @@ shell-lint: ## Run shell linting.
 sync-hugo-version:
 	$(SED) -r 's/(.*(HUGO_VERSION).*)/  HUGO_VERSION = "$(subst v,,$(HUGO_VERSION))"/g' -i netlify.toml
 
-PATHS_TO_VERIFY := config/components apis charts/kueue/templates client-go site/ netlify.toml
+PATHS_TO_VERIFY := config/components apis charts/kueue client-go site/ netlify.toml
 .PHONY: verify
 verify: gomod-verify ci-lint fmt-verify shell-lint toc-verify manifests generate update-helm helm-verify helm-unit-test prepare-release-branch sync-hugo-version
 	git --no-pager diff --exit-code $(PATHS_TO_VERIFY)
@@ -336,11 +338,16 @@ artifacts: clean-artifacts kustomize helm-chart-package prepare-manifests ## Gen
 
 .PHONY: prepare-release-branch
 prepare-release-branch: yq kustomize ## Prepare the release branch with the release version.
-	$(SED) -r 's/v[0-9]+\.[0-9]+\.[0-9]+/$(RELEASE_VERSION)/g' -i README.md -i site/hugo.toml
-	$(SED) -r 's/chart_version = "[0-9]+\.[0-9]+\.[0-9]+/chart_version = "$(CHART_VERSION)/g' -i README.md -i site/hugo.toml
-	$(SED) -r 's/--version="v?[0-9]+\.[0-9]+\.[0-9]+/--version="$(CHART_VERSION)/g' -i charts/kueue/README.md
-	$(SED) -r 's/KUEUE_VERSION="[0-9]+\.[0-9]+\.[0-9]+/KUEUE_VERSION="$(CHART_VERSION)/g' -i cmd/kueueviz/INSTALL.md
-	$(YQ) e '.appVersion = "$(RELEASE_VERSION)"' -i charts/kueue/Chart.yaml
+	$(SED) -r 's/v[0-9]+\.[0-9]+\.[0-9]+/$(RELEASE_VERSION)/g' -i README.md -i site/hugo.toml -i cmd/kueueviz/INSTALL.md
+	$(SED) -r 's/chart_version = "[0-9]+\.[0-9]+\.[0-9]+/chart_version = "$(APP_VERSION)/g' -i README.md -i site/hugo.toml
+	$(SED) -r 's/--version="[0-9]+\.[0-9]+\.[0-9]+/--version="$(APP_VERSION)/g' -i charts/kueue/README.md.gotmpl -i cmd/kueueviz/INSTALL.md
+	$(YQ) e '.appVersion = "$(RELEASE_VERSION)" | .version = "$(APP_VERSION)"' -i charts/kueue/Chart.yaml
+	$(YQ) e '.controllerManager.manager.image.tag = "$(RELEASE_BRANCH)" | .kueueViz.backend.image.tag = "$(RELEASE_BRANCH)" | .kueueViz.frontend.image.tag = "$(RELEASE_BRANCH)"' -i charts/kueue/values.yaml
+	$(YQ) e '.version = "$(APP_VERSION)"' -i cmd/kueueviz/frontend/package.json
+	$(YQ) e '.version = "$(APP_VERSION)" | .packages[""].version = "$(APP_VERSION)"' -i cmd/kueueviz/frontend/package-lock.json
+	$(YQ) e '.version = "$(APP_VERSION)"' -i test/e2e/kueueviz/package.json
+	$(YQ) e '.version = "$(APP_VERSION)" | .packages[""].version = "$(APP_VERSION)"' -i test/e2e/kueueviz/package-lock.json
+	$(MAKE) generate-helm-docs
 
 .PHONY: update-security-insights
 update-security-insights: yq
@@ -437,6 +444,10 @@ generate-kueuectl-docs: kueuectl-docs
 	$(BIN_DIR)/kueuectl-docs \
 		$(PROJECT_DIR)/cmd/kueuectl-docs/templates \
 		$(PROJECT_DIR)/site/content/en/docs/reference/kubectl-kueue/commands
+
+.PHONY: generate-helm-docs
+generate-helm-docs: helm-docs
+	$(HELM_DOCS) -c $(PROJECT_DIR)/charts/kueue
 
 # Build the ray-project-mini image
 .PHONY: ray-project-mini-image-build

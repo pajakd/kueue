@@ -69,11 +69,11 @@ var (
 	}
 )
 
-// WorkloadReference is the full reference to Workload formed as <namespace>/< kueue.WorkloadName >.
-type WorkloadReference string
+// Reference is the full reference to Workload formed as <namespace>/< kueue.WorkloadName >.
+type Reference string
 
-func NewWorkloadReference(namespace, name string) WorkloadReference {
-	return WorkloadReference(namespace + "/" + name)
+func NewReference(namespace, name string) Reference {
+	return Reference(namespace + "/" + name)
 }
 
 func Status(w *kueue.Workload) string {
@@ -393,8 +393,8 @@ func CanBePartiallyAdmitted(wl *kueue.Workload) bool {
 	return false
 }
 
-func Key(w *kueue.Workload) WorkloadReference {
-	return NewWorkloadReference(w.Namespace, w.Name)
+func Key(w *kueue.Workload) Reference {
+	return NewReference(w.Namespace, w.Name)
 }
 
 func reclaimableCounts(wl *kueue.Workload) map[kueue.PodSetReference]int32 {
@@ -651,21 +651,21 @@ func SetQuotaReservation(w *kueue.Workload, admission *kueue.Admission, clock cl
 // NeedsSecondPass checks if the second pass of scheduling is needed for the
 // workload.
 func NeedsSecondPass(w *kueue.Workload) bool {
+	if IsFinished(w) || IsEvicted(w) || !HasQuotaReservation(w) {
+		return false
+	}
 	return needsSecondPassForDelayedAssignment(w) || needsSecondPassAfterNodeFailure(w)
 }
 
 func needsSecondPassForDelayedAssignment(w *kueue.Workload) bool {
-	return HasQuotaReservation(w) &&
-		len(w.Status.AdmissionChecks) > 0 &&
+	return len(w.Status.AdmissionChecks) > 0 &&
 		HasAllChecksReady(w) &&
 		HasTopologyAssignmentsPending(w) &&
-		!IsAdmitted(w) &&
-		!IsFinished(w) &&
-		!IsEvicted(w)
+		!IsAdmitted(w)
 }
 
 func needsSecondPassAfterNodeFailure(w *kueue.Workload) bool {
-	return IsAdmitted(w) && HasNodeToReplace(w)
+	return HasTopologyAssignmentWithNodeToReplace(w)
 }
 
 // HasTopologyAssignmentsPending checks if the workload contains any

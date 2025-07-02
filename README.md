@@ -3,8 +3,8 @@
 [![GoReport Widget]][GoReport Status]
 [![Latest Release](https://img.shields.io/github/v/release/kubernetes-sigs/kueue?include_prereleases)](https://github.com/kubernetes-sigs/kueue/releases/latest)
 
-[GoReport Widget]: https://goreportcard.com/badge/github.com/kubernetes-sigs/kueue
-[GoReport Status]: https://goreportcard.com/report/github.com/kubernetes-sigs/kueue
+[GoReport Widget]: https://goreportcard.com/badge/sigs.k8s.io/kueue
+[GoReport Status]: https://goreportcard.com/report/sigs.k8s.io/kueue
 
 <img src="https://github.com/kubernetes-sigs/kueue/blob/main/site/static/images/logo.svg" width="100" alt="kueue logo">
 
@@ -63,7 +63,7 @@ Read the [overview](https://kueue.sigs.k8s.io/docs/overview/) and watch the Kueu
 To install the latest release of Kueue in your cluster, run the following command:
 
 ```shell
-kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.12.2/manifests.yaml
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.12.3/manifests.yaml
 ```
 
 The controller runs in the `kueue-system` namespace.

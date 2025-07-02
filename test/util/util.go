@@ -69,7 +69,6 @@ import (
 	podconstants "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption"
-	utilnode "sigs.k8s.io/kueue/pkg/util/node"
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 	"sigs.k8s.io/kueue/pkg/util/testing"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -527,18 +526,18 @@ func ExpectLQAdmittedWorkloadsTotalMetric(lq *kueue.LocalQueue, value int) {
 }
 
 func ExpectLQByStatusMetric(lq *kueue.LocalQueue, status metav1.ConditionStatus) {
-	for i, s := range metrics.ConditionStatusValues {
-		var wantV float64
-		if metrics.ConditionStatusValues[i] == status {
-			wantV = 1
-		}
-		metric := metrics.LocalQueueByStatus.WithLabelValues(lq.Name, lq.Namespace, string(s))
-		gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
+	gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
+		for i, s := range metrics.ConditionStatusValues {
+			var wantV float64
+			if metrics.ConditionStatusValues[i] == status {
+				wantV = 1
+			}
+			metric := metrics.LocalQueueByStatus.WithLabelValues(lq.Name, lq.Namespace, string(s))
 			v, err := testutil.GetGaugeMetricValue(metric)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			g.Expect(v).Should(gomega.Equal(wantV), "local_queue_status with status=%s", s)
-		}, Timeout, Interval).Should(gomega.Succeed())
-	}
+		}
+	}, Timeout, Interval).Should(gomega.Succeed())
 }
 
 func ExpectPendingWorkloadsMetric(cq *kueue.ClusterQueue, active, inadmissible int) {
@@ -1076,7 +1075,7 @@ func SetNodeCondition(ctx context.Context, k8sClient client.Client, node *corev1
 	gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
 		var updatedNode corev1.Node
 		g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(node), &updatedNode)).To(gomega.Succeed())
-		condition := utilnode.GetNodeCondition(&updatedNode, newCondition.Type)
+		condition := utiltas.GetNodeCondition(&updatedNode, newCondition.Type)
 		changed := false
 		if condition == nil {
 			updatedNode.Status.Conditions = append(updatedNode.Status.Conditions, *newCondition)
