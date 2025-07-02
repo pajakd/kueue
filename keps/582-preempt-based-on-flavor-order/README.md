@@ -169,11 +169,11 @@ const (
   TryNextFlavor FlavorFungibilityPolicy = "TryNextFlavor"
 )
 
-type FlavorFungibilityPreference string
+type FlavorSelectionStrategy string
 
 const (
-   AvoidPreemption FlavorFungibilityPreference = "AvoidPreemption"
-   AvoidBorrowing  FlavorFungibilityPreference = "AvoidBorrowing"
+   AvoidPreemption FlavorSelectionStrategy = "AvoidPreemption"
+   AvoidBorrowing  FlavorSelectionStrategy = "AvoidBorrowing"
 )
 
 type FlavorFungibility struct {
@@ -181,7 +181,7 @@ type FlavorFungibility struct {
   WhenCanBorrow FlavorFungibilityPolicy  `json:"whenCanBorrow"`
   // +kubebuilder:validation:Enum="Preempt,TryNextFlavor"
   WhenCanPreempt FlavorFungibilityPolicy `json:"whenCanPreempt"`
-  // PreferredStrategy defines how should the flavor be chosen in case of multiple
+  // WhenCanPreemptAndBorrow defines how should the flavor be chosen in case of multiple
   // options. The possible values are:
   //
   // - `AvoidPreemption` (default): prefer to allocate in a flavor that does not preempt
@@ -190,7 +190,7 @@ type FlavorFungibility struct {
   //    even if it means preempting other workloads.
   // +kubebuilder:validation:Enum={AvoidPreemption,AvoidBorrowing}
   // +kubebuilder:default="AvoidPreemption"
-  PreferredStrategy FlavorFungibilityPreference `json:"preferredStrategy,omitempty"`
+  WhenCanPreemptAndBorrow FlavorSelectionStrategy `json:"preferredStrategy,omitempty"`
 }
 
 // ClusterQueueSpec defines the desired state of ClusterQueue
