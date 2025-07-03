@@ -164,8 +164,8 @@ For each type of resource in each podSet, Kueue will traverse all resource group
 
 ```
 const (
-  Borrow FlavorFungibilityPolicy = "Borrow"
-  Preempt  FlavorFungibilityPolicy = "Preempt"
+  Borrow FlavorFungibilityPolicy = "Borrow"    // deprecated
+  Preempt  FlavorFungibilityPolicy = "Preempt" // deprecated
   TryNextFlavor FlavorFungibilityPolicy = "TryNextFlavor"
   Settle FlavorFungibilityPolicy = "Settle"
 )
@@ -237,9 +237,9 @@ We try to schedule a podset in succesive resource flavors in a loop and we decid
 |------ | -------- | ------- |
 | NoFit | any | continue |
 | Preempt, NoBorrow  | WhenCanPreempt = TryNextFlavor | continue |
-| Preempt, NoBorrow  | WhenCanPreempt = Preempt or Settle | break |
+| Preempt, NoBorrow  | WhenCanPreempt = Settle or Preempt | break |
 | Fit, Borrow | WhenCanBorrow = TryNextFlavor | continue |
-| Fit, Borrow | WhenCanBorrow = Borrow or Settle | break |
+| Fit, Borrow | WhenCanBorrow = Settle or Borrow | break |
 | Fit, NoBorrow| any| break| 
 
 After we complete the loop, either by trying all the flavors or by breaking out of it, we end up with a list of possible flavors. We choose the flavor to assign based on the following rules:
@@ -247,7 +247,6 @@ After we complete the loop, either by trying all the flavors or by breaking out 
 - (Fit, NoBorrow) is the most prefered
 - (Fit, Borrow) is prefered over (Preempt, NoBorrow) if `WhenCanPreemptAndBorrow = AvoidPreemption`
 - (Preempt, NoBorrow) is prefered over (Fit, Borrow) if `WhenCanPreemptAndBorrow = AvoidBorrowing`
-- (Preempt, Borrow) is the least prefered
 
 We will store the scheduling context in workload info so that we can start from where we stop in previous scheduling attempts. This will be useful to avoid to waste time in one flavor all the time if we try to preempt in a flavor and failed. Scheduling context will contain the `LastTriedFlavorIdx`, `ClusterQueueGeneration` attached to the CQ and `CohortGeneration`. Any changes to these properties will lead to a scheduling from the first flavor.
 
