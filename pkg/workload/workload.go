@@ -970,13 +970,6 @@ func HasNodeToReplace(w *kueue.Workload) bool {
 	return len(w.Status.NodesToReplace) > 0
 }
 
-/*func NodeToReplace(w *kueue.Workload) string {
-	if !HasNodeToReplace(w) {
-		return ""
-	}
-	return w.Status.NodesToReplace[0]
-}*/
-
 func HasTopologyAssignmentWithNodeToReplace(w *kueue.Workload) bool {
 	if !HasNodeToReplace(w) || !IsAdmitted(w) {
 		return false
