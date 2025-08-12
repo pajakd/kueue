@@ -160,16 +160,6 @@ func TestNodeFailureReconciler(t *testing.T) {
 			reconcileRequests: []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantFailedNodes:   nil,
 		},
-		"Node becomes healthy, annotation is removed": {
-			initObjs: []client.Object{
-				newNodeTest(nodeName, corev1.ConditionTrue, fakeClock, time.Duration(0)),
-				workloadWithAnnotation.DeepCopy(),
-				basePod.DeepCopy(),
-			},
-			reconcileRequests: []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantFailedNode:    "",
-		},
-
 		"Node Found and Unhealthy (NotReady), delay not passed - not marked as unavailable": {
 			initObjs: []client.Object{
 				newNodeTest(nodeName, corev1.ConditionFalse, fakeClock, time.Duration(0)),
