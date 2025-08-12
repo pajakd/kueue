@@ -40,7 +40,6 @@ import (
 	"sigs.k8s.io/kueue/pkg/cache"
 	"sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/features"
-	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/scheduler/flavorassigner"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/classical"
@@ -174,7 +173,7 @@ func (p *Preemptor) IssuePreemptions(ctx context.Context, preemptor *workload.In
 
 			log.V(3).Info("Preempted", "targetWorkload", klog.KObj(target.WorkloadInfo.Obj), "preemptingWorkload", klog.KObj(preemptor.Obj), "reason", target.Reason, "message", message, "targetClusterQueue", klog.KRef("", string(target.WorkloadInfo.ClusterQueue)))
 			p.recorder.Eventf(target.WorkloadInfo.Obj, corev1.EventTypeNormal, "Preempted", message)
-			workload.ReportPreemption(preemptor.ClusterQueue, target.Reason, target.WorkloadInfo.ClusterQueue, target.WorkloadInfo.Obj)
+			workload.ReportPreemption(preemptor.ClusterQueue, target.Reason, target.WorkloadInfo.ClusterQueue)
 		} else {
 			log.V(3).Info("Preemption ongoing", "targetWorkload", klog.KObj(target.WorkloadInfo.Obj), "preemptingWorkload", klog.KObj(preemptor.Obj))
 		}
@@ -185,13 +184,8 @@ func (p *Preemptor) IssuePreemptions(ctx context.Context, preemptor *workload.In
 
 func (p *Preemptor) applyPreemptionWithSSA(ctx context.Context, w *kueue.Workload, reason, message string) error {
 	w = w.DeepCopy()
-	workload.PrepareForEviction(w, p.clock.Now(), kueue.WorkloadEvictedByPreemption, message)
-	reportWorkloadEvictedOnce := workload.WorkloadEvictionStateInc(w, kueue.WorkloadEvictedByPreemption, "")
 	workload.SetPreemptedCondition(w, reason, message)
-	if reportWorkloadEvictedOnce {
-		metrics.ReportEvictedWorkloadsOnce(w.Status.Admission.ClusterQueue, kueue.WorkloadEvictedByPreemption, "")
-	}
-	return workload.ApplyAdmissionStatus(ctx, p.client, w, true, p.clock)
+	return workload.Evict(ctx, p.client, p.recorder, w, kueue.WorkloadEvictedByPreemption, "", message, p.clock)
 }
 
 type preemptionAttemptOpts struct {
@@ -208,6 +202,7 @@ type preemptionAttemptOpts struct {
 // fits
 func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target {
 	hierarchicalReclaimCtx := &classical.HierarchicalPreemptionCtx{
+		Log:               preemptionCtx.log,
 		Wl:                preemptionCtx.preemptor.Obj,
 		Cq:                preemptionCtx.preemptorCQ,
 		FrsNeedPreemption: preemptionCtx.frsNeedPreemption,
@@ -380,7 +375,7 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 		return nil
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		return CandidatesOrdering(candidates[i], candidates[j], preemptionCtx.preemptorCQ.Name, p.clock.Now())
+		return CandidatesOrdering(preemptionCtx.log, candidates[i], candidates[j], preemptionCtx.preemptorCQ.Name, p.clock.Now())
 	})
 	if logV := preemptionCtx.log.V(5); logV.Enabled() {
 		logV.Info("Simulating fair preemption", "candidates", workload.References(candidates), "resourcesRequiringPreemption", preemptionCtx.frsNeedPreemption.UnsortedList(), "preemptingWorkload", klog.KObj(preemptionCtx.preemptor.Obj))
@@ -542,7 +537,7 @@ func resourceUsagePreemptionEnabled(a, b *workload.Info) bool {
 // 2. (AdmissionFairSharing only) Workloads with lower LocalQueue's usage first
 // 3. Workloads with lower priority first.
 // 4. Workloads admitted more recently first.
-func CandidatesOrdering(a, b *workload.Info, cq kueue.ClusterQueueReference, now time.Time) bool {
+func CandidatesOrdering(log logr.Logger, a, b *workload.Info, cq kueue.ClusterQueueReference, now time.Time) bool {
 	aEvicted := meta.IsStatusConditionTrue(a.Obj.Status.Conditions, kueue.WorkloadEvicted)
 	bEvicted := meta.IsStatusConditionTrue(b.Obj.Status.Conditions, kueue.WorkloadEvicted)
 	if aEvicted != bEvicted {
@@ -556,6 +551,9 @@ func CandidatesOrdering(a, b *workload.Info, cq kueue.ClusterQueueReference, now
 
 	if features.Enabled(features.AdmissionFairSharing) && resourceUsagePreemptionEnabled(a, b) {
 		if a.LocalQueueFSUsage != b.LocalQueueFSUsage {
+			log.V(3).Info("Comparing workloads by LocalQueue fair sharing usage",
+				"workloadA", klog.KObj(a.Obj), "queueA", a.Obj.Spec.QueueName, "usageA", a.LocalQueueFSUsage,
+				"workloadB", klog.KObj(b.Obj), "queueB", b.Obj.Spec.QueueName, "usageB", b.LocalQueueFSUsage)
 			return *a.LocalQueueFSUsage > *b.LocalQueueFSUsage
 		}
 	}

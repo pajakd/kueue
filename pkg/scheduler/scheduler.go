@@ -566,7 +566,7 @@ func (s *Scheduler) evictWorkloadAfterFailedTASReplacement(ctx context.Context, 
 	log.V(3).Info("Evicting workload after failed try to find a node replacement; TASFailedNodeReplacementFailFast enabled")
 	msg := fmt.Sprintf("Workload was evicted as there was no replacement for a failed node: %s", wl.Status.NodesToReplace[0])
 	wl.Status.NodesToReplace = nil
-	return workload.EvictWorkload(ctx, s.client, s.recorder, wl, kueue.WorkloadEvictedDueToNodeFailures, msg, s.clock)
+	return workload.Evict(ctx, s.client, s.recorder, wl, kueue.WorkloadEvictedDueToNodeFailures, "", msg, s.clock)
 }
 
 func updateAssignmentForTAS(cq *cache.ClusterQueueSnapshot, wl *workload.Info, assignment *flavorassigner.Assignment, targets []*preemption.Target) {

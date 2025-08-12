@@ -33,9 +33,6 @@ description: >
 Make sure the following conditions are met:
 
 - A Kubernetes cluster with version 1.29 or newer is running. Learn how to [install the Kubernetes tools](https://kubernetes.io/docs/tasks/tools/).
-- The `SuspendJob` [feature gate][feature_gate] is enabled. In Kubernetes 1.22 or newer, the feature gate is enabled by default.
-- (Optional) The `JobMutableNodeSchedulingDirectives` [feature gate][feature_gate] (available in Kubernetes 1.22 or newer) is enabled.
-  In Kubernetes 1.23 or newer, the feature gate is enabled by default.
 - The kubectl command-line tool has communication with your cluster.
 
 Kueue publishes [metrics](/docs/reference/metrics) to monitor its operators.
@@ -274,7 +271,7 @@ spec:
 | `PartialAdmission`                            | `false` | Alpha | 0.4   | 0.4   |
 | `PartialAdmission`                            | `true`  | Beta  | 0.5   |       |
 | `ProvisioningACC`                             | `false` | Alpha | 0.5   | 0.6   |
-| `ProvisioningACC`                             | `true`  | Beta  | 0.7   |       |
+| `ProvisioningACC`                             | `true`  | Beta  | 0.7   | 0.14  |
 | `QueueVisibility`                             | `false` | Alpha | 0.5   | 0.9   |
 | `VisibilityOnDemand`                          | `false` | Alpha | 0.6   | 0.8   |
 | `VisibilityOnDemand`                          | `true`  | Beta  | 0.9   |       |
@@ -304,6 +301,7 @@ spec:
 | Feature                           | Default | Stage      | Since | Until |
 | --------------------------------- | ------- | ---------- | ----- | ----- |
 | `ManagedJobsNamespaceSelector`    | `true`  | GA         | 0.13  |       |
+| `ProvisioningACC`                 | `true`  | GA         | 0.14  |       |
 | `QueueVisibility`                 | `false` | Alpha      | 0.4   | 0.9   |
 | `QueueVisibility`                 | `false` | Deprecated | 0.9   |       |
 | `TASProfileMostFreeCapacity`      | `false` | Deprecated | 0.11  | 0.13  |

@@ -499,6 +499,7 @@ func (c *Controller) syncCheckStates(
 	wlInfo.update(wl, c.clock)
 	checksMap := slices.ToRefMap(wl.Status.AdmissionChecks, func(c *kueue.AdmissionCheckState) kueue.AdmissionCheckReference { return c.Name })
 	wlPatch := workload.BaseSSAWorkload(wl, true)
+	wlPatch.Status.RequeueState = wl.Status.RequeueState.DeepCopy()
 	recorderMessages := make([]string, 0, len(checkConfig))
 	updated := false
 	for check, prc := range checkConfig {
@@ -623,10 +624,8 @@ func podSetUpdates(log logr.Logger, wl *kueue.Workload, pr *autoscaling.Provisio
 		podSetUpdate := kueue.PodSetUpdate{
 			Name: refMap[ps.PodTemplateRef.Name],
 			Annotations: map[string]string{
-				DeprecatedConsumesAnnotationKey:  pr.Name,
-				DeprecatedClassNameAnnotationKey: pr.Spec.ProvisioningClassName,
-				ConsumesAnnotationKey:            pr.Name,
-				ClassNameAnnotationKey:           pr.Spec.ProvisioningClassName},
+				ConsumesAnnotationKey:  pr.Name,
+				ClassNameAnnotationKey: pr.Spec.ProvisioningClassName},
 		}
 		if psUpdate := prc.Spec.PodSetUpdates; psUpdate != nil {
 			podSetUpdate.NodeSelector = make(map[string]string, len(psUpdate.NodeSelector))

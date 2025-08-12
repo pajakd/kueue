@@ -125,6 +125,10 @@ func (r *nodeFailureReconciler) Update(e event.TypedUpdateEvent[*corev1.Node]) b
 	oldReady := utiltas.IsNodeStatusConditionTrue(e.ObjectOld.Status.Conditions, corev1.NodeReady)
 	if oldReady != newReady {
 		r.log.V(4).Info("Node Ready status changed, triggering reconcile", "node", klog.KObj(e.ObjectNew), "oldReady", oldReady, "newReady", newReady)
+	newReady := utiltas.IsNodeStatusConditionTrue(e.ObjectNew.Status.Conditions, corev1.NodeReady)
+	oldReady := utiltas.IsNodeStatusConditionTrue(e.ObjectOld.Status.Conditions, corev1.NodeReady)
+	if oldReady != newReady {
+		r.log.V(4).Info("Node Ready status changed, triggering reconcile", "node", klog.KObj(e.ObjectNew), "oldReady", oldReady, "newReady", newReady)
 		return true
 	}
 	return false
@@ -224,9 +228,8 @@ func (r *nodeFailureReconciler) evictWorkload(ctx context.Context, log logr.Logg
 	if len(wl.Status.NodesToReplace) > 0 && !slices.Contains(wl.Status.NodesToReplace, nodeName) && !workload.IsEvicted(wl) {
 		log = log.WithValues("failedNodes", wl.Status.NodesToReplace)
 		log.V(3).Info("Evicting workload due to multiple node failures")
-		allFailedNodes := append(slices.Clone(wl.Status.NodesToReplace), nodeName)
-		evictionMsg := fmt.Sprintf(nodeMultipleFailuresEvictionMessageFormat, strings.Join(allFailedNodes, ", "))
-		if evictionErr := r.startEviction(ctx, wl, evictionMsg); evictionErr != nil {
+		evictionMsg := fmt.Sprintf(nodeMultipleFailuresEvictionMessageFormat, failedNode, nodeName)
+		if evictionErr := workload.Evict(ctx, r.client, r.recorder, wl, kueue.WorkloadEvictedDueToNodeFailures, "", evictionMsg, r.clock); evictionErr != nil {
 			log.V(2).Error(evictionErr, "Failed to complete eviction process")
 			return false, evictionErr
 		} else {
@@ -296,15 +299,6 @@ func (r *nodeFailureReconciler) patchWorkloadsForNodeToReplace(ctx context.Conte
 	if len(workloadProcessingErrors) > 0 {
 		return errors.Join(workloadProcessingErrors...)
 	}
-	return nil
-}
-
-func (r *nodeFailureReconciler) startEviction(ctx context.Context, wl *kueue.Workload, evictionMessage string) error {
-	workload.PrepareForEviction(wl, r.clock.Now(), kueue.WorkloadEvictedDueToNodeFailures, evictionMessage)
-	if err := workload.ApplyAdmissionStatus(ctx, r.client, wl, true, r.clock); err != nil {
-		return err
-	}
-	workload.ReportEvictedWorkload(r.recorder, wl, wl.Status.Admission.ClusterQueue, kueue.WorkloadEvictedDueToNodeFailures, evictionMessage)
 	return nil
 }
 

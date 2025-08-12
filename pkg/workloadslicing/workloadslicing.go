@@ -28,7 +28,6 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apiserver/pkg/storage"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
@@ -112,21 +111,6 @@ func Finish(ctx context.Context, clnt client.Client, workloadSlice *kueue.Worklo
 	return nil
 }
 
-// versionHelper is used in the FindNotFinishedWorkloads sort routine as a tiebreaker
-// for workloads with identical creationTimestamp values.
-//
-// Note: Kubernetes documentation explicitly states:
-//
-//	"Clients must not assume that resource versions are numeric or collatable."
-//
-// To comply with this guidance, we rely on the Kubernetes apiserver/storage library
-// (storage.APIObjectVersioner) to perform resourceVersion comparisons.
-//
-// This ensures that if Kubernetes changes its internal resourceVersion format or semantics,
-// the helper will either be updated accordingly or removed entirely, in which case,
-// such changes will surface at compile time, prompting this code to be updated as needed.
-var versionHelper = storage.APIObjectVersioner{}
-
 // FindNotFinishedWorkloads returns a sorted list of workloads "owned by" the provided job object/gvk combination and
 // without "Finished" condition with status = "True".
 func FindNotFinishedWorkloads(ctx context.Context, clnt client.Client, jobObject client.Object, jobObjectGVK schema.GroupVersionKind) ([]kueue.Workload, error) {
@@ -137,14 +121,14 @@ func FindNotFinishedWorkloads(ctx context.Context, clnt client.Client, jobObject
 
 	// Sort workloads by creation timestamp, oldest first.
 	// In the rare case that two workload slices have identical creationTimestamp values
-	// (due to RFC3339 second-level precision), fall back to resourceVersion comparison
+	// (due to RFC3339 second-level precision), use WorkloadSliceReplacementFor
 	// as a tiebreaker. This edge case is uncommon in production but can occur in
 	// integration or e2e tests where the original and scaled-up workloads are created
 	// in rapid succession.
 	sort.Slice(list.Items, func(i, j int) bool {
 		a, b := list.Items[i], list.Items[j]
 		if a.CreationTimestamp.Equal(&b.CreationTimestamp) {
-			return versionHelper.CompareResourceVersion(&a, &b) < 0
+			return b.Annotations[WorkloadSliceReplacementFor] == string(workload.Key(&a))
 		}
 		return a.CreationTimestamp.Before(&b.CreationTimestamp)
 	})
@@ -153,6 +137,14 @@ func FindNotFinishedWorkloads(ctx context.Context, clnt client.Client, jobObject
 	return slices.DeleteFunc(list.Items, func(w kueue.Workload) bool {
 		return apimeta.IsStatusConditionTrue(w.Status.Conditions, kueue.WorkloadFinished)
 	}), nil
+}
+
+// ScaledDown returns true if the new pod sets represent a scale-down operation.
+// This is determined by checking whether at least one new pod set has fewer replicas
+// than its corresponding old pod set, and none of the old pod sets have fewer replicas
+// than their corresponding new pod sets.
+func ScaledDown(oldCounts, newCounts workload.PodSetsCounts) bool {
+	return newCounts.HasFewerReplicasThan(oldCounts) && !oldCounts.HasFewerReplicasThan(newCounts)
 }
 
 // EnsureWorkloadSlices processes the Job object and returns the appropriate workload slice.
@@ -192,10 +184,10 @@ func EnsureWorkloadSlices(ctx context.Context, clnt client.Client, jobPodSets []
 		// Allow updating the existing slice if:
 		// a. It hasn't been admitted (no quota reserved), or
 		// b. It's a scale-down event.
-		if !workload.HasQuotaReservation(wl) || jobPodSetsCounts.HasFewerReplicasThan(wlPodSetsCounts) {
+		if !workload.HasQuotaReservation(wl) || ScaledDown(wlPodSetsCounts, jobPodSetsCounts) {
 			workload.ApplyPodSetCounts(wl, jobPodSetsCounts)
 			if err := clnt.Update(ctx, wl); err != nil {
-				return nil, true, fmt.Errorf("failed to update workload pod set counts: %w", err)
+				return nil, true, fmt.Errorf("failed to update workload's pod sets counts: %w", err)
 			}
 			return wl, true, nil
 		}
@@ -209,12 +201,12 @@ func EnsureWorkloadSlices(ctx context.Context, clnt client.Client, jobPodSets []
 		// This transient state typically occurs when a new slice has been created,
 		// and the old slice is pending deactivation. The system should resolve this
 		// by deactivating the old slice, after which processing will continue under "case #1".
-
-		// There is also an edge-case when the old slice was preempted/evicted by the scheduler
-		// to make the room for other (than new slice) workload, which would result in two
-		// "pending" workloads. In such case - it is safe to deactivate the old slice.
 		oldWorkload := workloads[0]
-		if !workload.HasQuotaReservation(&oldWorkload) {
+
+		// Finish the old workload slice if it lost its quota reservation or if it was
+		// explicitly evicted.
+		if evictedCondition := apimeta.FindStatusCondition(oldWorkload.Status.Conditions, kueue.WorkloadEvicted); !workload.HasQuotaReservation(&oldWorkload) || evictedCondition != nil {
+			// Finish the old workload slice as out of sync.
 			if err := Finish(ctx, clnt, &oldWorkload, kueue.WorkloadFinishedReasonOutOfSync, "The workload slice is out of sync with its parent job"); err != nil {
 				return nil, true, err
 			}
