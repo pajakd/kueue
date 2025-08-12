@@ -41,7 +41,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	config "sigs.k8s.io/kueue/apis/config/v1beta1"
-	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	"sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/features"
@@ -825,6 +824,7 @@ func admissionStatusPatch(w *kueue.Workload, wlCopy *kueue.Workload) {
 	}
 	wlCopy.Status.ClusterName = w.Status.ClusterName
 	wlCopy.Status.NominatedClusterNames = w.Status.NominatedClusterNames
+	wlCopy.Status.NodesToReplace = w.Status.NodesToReplace
 }
 
 func AdmissionChecksStatusPatch(w *kueue.Workload, wlCopy *kueue.Workload, c clock.Clock) {
@@ -967,34 +967,26 @@ func HasConditionWithTypeAndReason(w *kueue.Workload, cond *metav1.Condition) bo
 }
 
 func HasNodeToReplace(w *kueue.Workload) bool {
-	if w == nil {
-		return false
-	}
-	annotations := w.GetAnnotations()
-	_, found := annotations[kueuealpha.NodeToReplaceAnnotation]
-	return found
+	return len(w.Status.NodesToReplace) > 0
 }
 
-func NodeToReplace(w *kueue.Workload) string {
+/*func NodeToReplace(w *kueue.Workload) string {
 	if !HasNodeToReplace(w) {
 		return ""
 	}
-	annotations := w.GetAnnotations()
-	return annotations[kueuealpha.NodeToReplaceAnnotation]
-}
+	return w.Status.NodesToReplace[0]
+}*/
 
 func HasTopologyAssignmentWithNodeToReplace(w *kueue.Workload) bool {
 	if !HasNodeToReplace(w) || !IsAdmitted(w) {
 		return false
 	}
-	annotations := w.GetAnnotations()
-	failedNode := annotations[kueuealpha.NodeToReplaceAnnotation]
 	for _, psa := range w.Status.Admission.PodSetAssignments {
 		if psa.TopologyAssignment == nil {
 			continue
 		}
 		for _, domain := range psa.TopologyAssignment.Domains {
-			if domain.Values[len(domain.Values)-1] == failedNode {
+			if slices.Contains(w.Status.NodesToReplace, domain.Values[len(domain.Values)-1]) {
 				return true
 			}
 		}

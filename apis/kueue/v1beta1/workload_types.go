@@ -428,6 +428,17 @@ type WorkloadStatus struct {
 	// This field is reset after the Workload is evicted.
 	// +optional
 	ClusterName *string `json:"clusterName,omitempty"`
+
+	// nodesToReplace, if specified, holds the name of failed nodes running at least one pod of this workload.
+	// This field is for internal use, is set by the node failure controler and should not be set by the users.
+	// It is used to signal kueue scheduler to search for replacement of the failed nodes.
+	// It is neccessary if the native kube scheduler cannot automatically replace failed nodes.
+	// Used by Topology Aware Scheduling, requires enabling the TASFaliedNodReplacement feature gate.
+	//
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=16
+	// +optional
+	NodesToReplace []string `json:"nodesToReplace,omitempty"`
 }
 
 type SchedulingStats struct {
