@@ -435,8 +435,6 @@ type WorkloadStatus struct {
 	// It is neccessary if the native kube scheduler cannot automatically replace failed nodes.
 	// Used by Topology Aware Scheduling, requires enabling the TASFaliedNodReplacement feature gate.
 	//
-	// +listType=atomic
-	// +kubebuilder:validation:MaxItems=16
 	// +optional
 	NodesToReplace []string `json:"nodesToReplace,omitempty"`
 }

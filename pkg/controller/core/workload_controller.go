@@ -186,13 +186,6 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if workload.IsAdmitted(&wl) && workload.HasNodeToReplace(&wl) {
 		if !workload.HasTopologyAssignmentWithNodeToReplace(&wl) {
 			r.log.V(3).Info("Clearing nodesToReplace list from Workload", "nodesToReplace", wl.Status.NodesToReplace)
-			/*if err := clientutil.Patch(ctx, r.client, &wl, false, func() (bool, error) {
-
-				wl.Status.NodesToReplace = nil
-				return true, nil
-			}); err != nil {
-				return ctrl.Result{}, client.IgnoreNotFound(err)
-			}*/
 			originalWl := wl.DeepCopy()
 			wl.Status.NodesToReplace = nil
 			if err := r.client.Status().Patch(ctx, &wl, client.MergeFrom(originalWl)); err != nil {

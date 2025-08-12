@@ -254,9 +254,7 @@ func (r *nodeFailureReconciler) patchWorkloadsForNodeToReplace(ctx context.Conte
 			continue
 		}
 
-		// evict workload when workload already has a different node marked for replacement.
-		// len(wl.Status.NodesToReplace) > 0 && !slices.Contains(wl.Status.NodesToReplace, nodeName) && !workload.IsEvicted(wl)
-		log.V(2).Info("AAA NodesToReplace", "nodesToReplace", wl.Status.NodesToReplace)
+		// evict workload when workload already has a different node marked for replacement
 		evictedNow, err := r.evictWorkload(ctx, log, &wl, nodeName)
 		if err != nil {
 			workloadProcessingErrors = append(workloadProcessingErrors, err)
