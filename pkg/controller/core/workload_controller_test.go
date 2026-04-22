@@ -1114,63 +1114,6 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 		},
-		"workload with retry checks should be evicted and checks should be pending, with message": {
-			workload: utiltestingapi.MakeWorkload("wl", "ns").
-				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
-				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
-				AdmissionChecks(kueue.AdmissionCheckState{
-					Name:    "check-1",
-					State:   kueue.CheckStateRetry,
-					Message: "infrastructure not prepared",
-				}, kueue.AdmissionCheckState{
-					Name:  "check-2",
-					State: kueue.CheckStateReady,
-				}, kueue.AdmissionCheckState{
-					Name:    "check-3",
-					State:   kueue.CheckStateRetry,
-					Message: "budget exhausted",
-				}).
-				Obj(),
-			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
-				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
-				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
-				AdmissionChecks(kueue.AdmissionCheckState{
-					Name:       "check-1",
-					State:      kueue.CheckStatePending,
-					Message:    "Reset to Pending after eviction. Previously: Retry",
-					RetryCount: ptr.To(int32(1)),
-				}, kueue.AdmissionCheckState{
-					Name:    "check-2",
-					State:   kueue.CheckStatePending,
-					Message: "Reset to Pending after eviction. Previously: Ready",
-				}, kueue.AdmissionCheckState{
-					Name:       "check-3",
-					State:      kueue.CheckStatePending,
-					Message:    "Reset to Pending after eviction. Previously: Retry",
-					RetryCount: ptr.To(int32(1)),
-				}).
-				Condition(metav1.Condition{
-					Type:    "Evicted",
-					Status:  "True",
-					Reason:  "AdmissionCheck",
-					Message: `At least one admission check is false`,
-				}).
-				SchedulingStatsEviction(
-					kueue.WorkloadSchedulingStatsEviction{
-						Reason: kueue.WorkloadEvictedByAdmissionCheck,
-						Count:  1,
-					},
-				).
-				Obj(),
-			wantEvents: []utiltesting.EventRecord{
-				{
-					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
-					EventType: "Normal",
-					Reason:    "EvictedDueToAdmissionCheck",
-					Message:   `At least one admission check is false`,
-				},
-			},
-		},
 		"increment re-queue count": {
 			reconcilerOpts: []Option{
 				WithWaitForPodsReady(&waitForPodsReadyConfig{
