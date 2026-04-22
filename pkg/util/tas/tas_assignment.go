@@ -256,8 +256,11 @@ func V1Beta2From(ta *TopologyAssignment) *kueue.TopologyAssignment {
 	return singleCompactSliceEncoding(ta)
 }
 
-func HasTASAssignmentOnNode(psa []kueue.PodSetAssignment, nodeName string) bool {
-	for _, psa := range psa {
+func HasTASAssignmentOnNode(admission *kueue.Admission, nodeName string) bool {
+	if admission == nil {
+		return false
+	}
+	for _, psa := range admission.PodSetAssignments {
 		if psa.TopologyAssignment == nil || !IsLowestLevelHostname(psa.TopologyAssignment.Levels) {
 			continue
 		}
