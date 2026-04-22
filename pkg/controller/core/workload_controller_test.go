@@ -995,7 +995,7 @@ func TestReconcile(t *testing.T) {
 					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
 					EventType: "Normal",
 					Reason:    "EvictedDueToAdmissionCheck",
-					Message:   `At least one admission check is false`,
+					Message:   "At least one admission check is false",
 				},
 			},
 		},
