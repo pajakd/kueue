@@ -333,6 +333,77 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 		})
 	})
 
+	ginkgo.When("Demonstrating an infinite fair sharing preemption loop", func() {
+		var (
+			cqReclaiming *kueue.ClusterQueue
+			cqBorrowing  *kueue.ClusterQueue
+		)
+		ginkgo.BeforeEach(func() {
+			createCohort(utiltestingapi.MakeCohort("loop-cohort").Obj())
+
+			cqReclaiming = createQueue(utiltestingapi.MakeClusterQueue("cq-reclaiming").
+				Cohort("loop-cohort").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+					Resource(corev1.ResourceCPU, "10").Obj()).
+				Preemption(kueue.ClusterQueuePreemption{
+					WithinClusterQueue:  kueue.PreemptionPolicyLowerOrNewerEqualPriority,
+					ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+				}).
+				FairWeight(resource.MustParse("1")).
+				Obj())
+
+			cqBorrowing = createQueue(utiltestingapi.MakeClusterQueue("cq-borrowing").
+				Cohort("loop-cohort").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+					Resource(corev1.ResourceCPU, "10").Obj()).
+				Preemption(kueue.ClusterQueuePreemption{
+					WithinClusterQueue:  kueue.PreemptionPolicyLowerOrNewerEqualPriority,
+					ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+				}).
+				FairWeight(resource.MustParse("1")).
+				Obj())
+		})
+
+		ginkgo.It("should demonstrate an infinite fair sharing preemption loop", func() {
+			ginkgo.By("Step 1: Creating and admitting w-base and w-borrower")
+			wBase := utiltestingapi.MakeWorkload("w-base", ns.Name).
+				Queue(kueue.LocalQueueName(cqReclaiming.Name)).
+				Request(corev1.ResourceCPU, "6").
+				Priority(0).
+				Obj()
+			util.MustCreate(ctx, k8sClient, wBase)
+			wls = append(wls, wBase)
+
+			wBorrower := utiltestingapi.MakeWorkload("w-borrower", ns.Name).
+				Queue(kueue.LocalQueueName(cqBorrowing.Name)).
+				Request(corev1.ResourceCPU, "13").
+				Priority(0).
+				Obj()
+			util.MustCreate(ctx, k8sClient, wBorrower)
+			wls = append(wls, wBorrower)
+
+			// Wait for both to be admitted
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wBase, wBorrower)
+
+			ginkgo.By("Step 2: Creating w-incoming")
+			wIncoming := utiltestingapi.MakeWorkload("w-incoming", ns.Name).
+				Queue(kueue.LocalQueueName(cqReclaiming.Name)).
+				Request(corev1.ResourceCPU, "8").
+				Priority(10).
+				Obj()
+			util.MustCreate(ctx, k8sClient, wIncoming)
+			wls = append(wls, wIncoming)
+
+			ginkgo.By("Step 3: Observing the infinite loop")
+			for i := 0; i < 100; i++ {
+				// w-borrower is preempted, w-borrower is admitted
+				util.ExpectWorkloadsToBePreempted(ctx, k8sClient, wBorrower)
+				util.FinishEvictionForWorkloads(ctx, k8sClient, wBorrower)
+				util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wBorrower)
+			}
+		})
+	})
+
 	ginkgo.When("Preemption is enabled and CQs have 0 weight", func() {
 		var (
 			cqA *kueue.ClusterQueue
