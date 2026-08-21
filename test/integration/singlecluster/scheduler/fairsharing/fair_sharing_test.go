@@ -394,13 +394,11 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			util.MustCreate(ctx, k8sClient, wIncoming)
 			wls = append(wls, wIncoming)
 
-			ginkgo.By("Step 3: Observing the infinite loop")
-			for i := 0; i < 100; i++ {
-				// w-borrower is preempted, w-borrower is admitted
-				util.ExpectWorkloadsToBePreempted(ctx, k8sClient, wBorrower)
-				util.FinishEvictionForWorkloads(ctx, k8sClient, wBorrower)
-				util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wBorrower)
-			}
+			ginkgo.By("Step 3: Checking that preemption and admission resolve cleanly without an infinite loop")
+			util.ExpectWorkloadsToBePreempted(ctx, k8sClient, wBase, wBorrower)
+			util.FinishEvictionForWorkloads(ctx, k8sClient, wBase, wBorrower)
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wIncoming, wBase)
+			util.ExpectWorkloadsToBePending(ctx, k8sClient, wBorrower)
 		})
 	})
 

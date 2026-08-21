@@ -14,7 +14,11 @@
 
 package fairsharing
 
-import schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
+import (
+	"k8s.io/apimachinery/pkg/util/sets"
+
+	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
+)
 
 // almostLCA is defined on two ClusterQueues, as the two nodes before
 // the lowest shared node - the LeastCommonAncestor (LCA). While LCA
@@ -24,21 +28,24 @@ type almostLCA interface {
 }
 
 // getAlmostLCAs returns almostLCAs of (preemptor, target).
-func getAlmostLCAs(t *TargetClusterQueue) (almostLCA, almostLCA) {
-	lca := getLCA(t)
-	return getAlmostLCA(t.ordering.preemptorCq, lca), getAlmostLCA(t.targetCq, lca)
+func getAlmostLCAs(preemptorCQ, targetCQ *schdcache.ClusterQueueSnapshot) (almostLCA, almostLCA) {
+	lca := getLCA(preemptorCQ, targetCQ)
+	return getAlmostLCA(preemptorCQ, lca), getAlmostLCA(targetCQ, lca)
 }
 
 // getLCA traverses from a ClusterQueue towards the root Cohort,
 // returning the first Cohort which contains the preemptor
 // ClusterQueue in its subtree.
-func getLCA(t *TargetClusterQueue) *schdcache.CohortSnapshot {
-	for ancestor := range t.targetCq.PathParentToRoot() {
-		if t.ordering.onPathFromRootToPreemptorCQ(ancestor) {
+func getLCA(preemptorCQ, targetCQ *schdcache.ClusterQueueSnapshot) *schdcache.CohortSnapshot {
+	preemptorAncestors := sets.New[*schdcache.CohortSnapshot]()
+	for ancestor := range preemptorCQ.PathParentToRoot() {
+		preemptorAncestors.Insert(ancestor)
+	}
+	for ancestor := range targetCQ.PathParentToRoot() {
+		if preemptorAncestors.Has(ancestor) {
 			return ancestor
 		}
 	}
-	// to make the compiler happy
 	panic("serious bug: could not find LeastCommonAncestor")
 }
 

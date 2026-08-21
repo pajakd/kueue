@@ -582,8 +582,8 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 		fits, targets = runSecondFsStrategy(retryCandidates, preemptionCtx, targets)
 	}
 
-	revertSimulation()
 	if !fits {
+		revertSimulation()
 		if logV := preemptionCtx.log.V(6); logV.Enabled() {
 			logV.Info("All fair sharing strategies failed",
 				"preemptingWorkload", klog.KObj(preemptionCtx.preemptor.Obj),
@@ -592,7 +592,8 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 		restoreSnapshot(preemptionCtx.snapshot, targets)
 		return nil
 	}
-	targets = fillBackWorkloads(preemptionCtx, targets, true)
+	targets = fillBackWorkloadsForFairSharing(preemptionCtx, targets, strategies)
+	revertSimulation()
 	restoreSnapshot(preemptionCtx.snapshot, targets)
 
 	if logV := preemptionCtx.log.V(6); logV.Enabled() {
@@ -606,6 +607,51 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 func containsWorkloadFromPreemptorCQ(preemptionCtx *preemptionCtx, targets []*Target) bool {
 	for _, t := range targets {
 		if t.WorkloadInfo.ClusterQueue == preemptionCtx.preemptorCQ.Name {
+			return true
+		}
+	}
+	return false
+}
+
+func fillBackWorkloadsForFairSharing(preemptionCtx *preemptionCtx, targets []*Target, strategies []fairsharing.Strategy) []*Target {
+	for i := len(targets) - 2; i >= 0; i-- {
+		candidate := targets[i]
+		preemptionCtx.snapshot.AddWorkload(candidate.WorkloadInfo)
+		if workloadFitsForFairSharing(preemptionCtx) && fairSharingPreemptionsStillValid(preemptionCtx, targets, i, strategies) {
+			// O(1) deletion: copy the last element into index i and reduce size.
+			targets[i] = targets[len(targets)-1]
+			targets = targets[:len(targets)-1]
+		} else {
+			preemptionCtx.snapshot.RemoveWorkload(candidate.WorkloadInfo)
+		}
+	}
+	return targets
+}
+
+func fairSharingPreemptionsStillValid(preemptionCtx *preemptionCtx, targets []*Target, excludedIdx int, strategies []fairsharing.Strategy) bool {
+	for j, target := range targets {
+		if j == excludedIdx {
+			continue
+		}
+		if target.Reason == kueue.InClusterQueueReason {
+			continue
+		}
+		if target.Reason == kueue.InCohortReclamationReason {
+			if features.Enabled(features.FairSharingPreemptWithinNominal) && queueWithinNominalInResourcesNeedingPreemption(preemptionCtx) {
+				continue
+			}
+		}
+		if !targetSatisfiesFairSharing(preemptionCtx, target, strategies) {
+			return false
+		}
+	}
+	return true
+}
+
+func targetSatisfiesFairSharing(preemptionCtx *preemptionCtx, target *Target, strategies []fairsharing.Strategy) bool {
+	preemptorNewShare, targetOldShare, targetNewShare := fairsharing.ComputeSharesForRemovedTarget(preemptionCtx.preemptorCQ, target.WorkloadCq, target.WorkloadInfo)
+	for _, strategy := range strategies {
+		if strategy(preemptorNewShare, targetOldShare, targetNewShare) {
 			return true
 		}
 	}

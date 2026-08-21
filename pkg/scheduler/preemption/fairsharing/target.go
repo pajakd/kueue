@@ -51,7 +51,7 @@ func (t *TargetClusterQueue) HasWorkload() bool {
 // do not depend on the removal of the workload being considered for
 // preemption.
 func (t *TargetClusterQueue) ComputeShares() (PreemptorNewShare, TargetOldShare) {
-	preemptorAlmostLCA, targetAlmostLCA := getAlmostLCAs(t)
+	preemptorAlmostLCA, targetAlmostLCA := getAlmostLCAs(t.ordering.preemptorCq, t.targetCq)
 	return PreemptorNewShare(preemptorAlmostLCA.DominantResourceShare()), TargetOldShare(targetAlmostLCA.DominantResourceShare())
 }
 
@@ -68,8 +68,30 @@ func (t *TargetClusterQueue) ComputeTargetShareAfterRemoval(wl *workload.Info) T
 	revertSimulation := t.targetCq.SimulateUsageRemoval(wl.Usage())
 	defer revertSimulation()
 
-	_, almostLCA := getAlmostLCAs(t)
+	_, almostLCA := getAlmostLCAs(t.ordering.preemptorCq, t.targetCq)
 	return TargetNewShare(almostLCA.DominantResourceShare())
+}
+
+// ComputeSharesForRemovedTarget computes the DominantResourceShares of the preemptor
+// and target ClusterQueues' AlmostLeastCommonAncestors for a target workload that has
+// already been removed from the snapshot (e.g., during fill-back validation).
+//
+// Because the target workload is currently absent from the snapshot, the target's
+// almostLCA DominantResourceShare directly reflects its state without the workload
+// (TargetNewShare). To determine TargetOldShare (the share prior to preemption), adding
+// the workload's usage is simulated on the target ClusterQueue so that the usage is
+// properly accounted for in each of its parent Cohorts.
+func ComputeSharesForRemovedTarget(preemptorCQ, targetCQ *schdcache.ClusterQueueSnapshot, wl *workload.Info) (PreemptorNewShare, TargetOldShare, TargetNewShare) {
+	preemptorAlmostLCA, targetAlmostLCA := getAlmostLCAs(preemptorCQ, targetCQ)
+	targetNewShare := TargetNewShare(targetAlmostLCA.DominantResourceShare())
+
+	revertTargetSim := targetCQ.SimulateUsageAddition(wl.Usage())
+	defer revertTargetSim()
+
+	preemptorNewShare := PreemptorNewShare(preemptorAlmostLCA.DominantResourceShare())
+	targetOldShare := TargetOldShare(targetAlmostLCA.DominantResourceShare())
+
+	return preemptorNewShare, targetOldShare, targetNewShare
 }
 
 // GetTargetCq returns the target ClusterQueue snapshot.
