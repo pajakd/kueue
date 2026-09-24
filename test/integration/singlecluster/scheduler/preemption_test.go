@@ -770,6 +770,65 @@ var _ = ginkgo.Describe("Preemption", func() {
 			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highWl)
 			util.ExpectWorkloadsToBePending(ctx, k8sClient, lowWl)
 		})
+
+		ginkgo.It("should not reserve cohort capacity when a borrowing workload has no same-queue preemption candidates", func() {
+			ginkgo.By("Updating cq1 to StrictFIFO so its pending head is evaluated every cycle")
+			gomega.Eventually(func(g gomega.Gomega) {
+				var updatedCQ kueue.ClusterQueue
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq1), &updatedCQ)).To(gomega.Succeed())
+				updatedCQ.Spec.QueueingStrategy = kueue.StrictFIFO
+				g.Expect(k8sClient.Update(ctx, &updatedCQ)).To(gomega.Succeed())
+			}, util.Timeout, util.Interval).Should(gomega.Succeed())
+
+			ginkgo.By("Creating cq3 with no nominal quota, so its workloads must borrow")
+			cq3 := utiltestingapi.MakeClusterQueue("same-queue-cq3").
+				Cohort("same-queue-cohort").
+				ResourceGroup(
+					*utiltestingapi.MakeFlavorQuotas("alpha").
+						Resource(corev1.ResourceCPU, "0").
+						Resource(corev1.ResourceMemory, "0").
+						Obj(),
+				).
+				Obj()
+			util.MustCreate(ctx, k8sClient, cq3)
+			q3 := utiltestingapi.MakeLocalQueue("same-queue-q3", ns.Name).ClusterQueue(cq3.Name).Obj()
+			util.MustCreate(ctx, k8sClient, q3)
+			defer func() {
+				gomega.Expect(util.DeleteWorkloadsInNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, q3, true)
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, cq3, true)
+			}()
+
+			ginkgo.By("Admitting a 1-CPU workload in cq2, leaving 3 CPU free in the cohort")
+			cq2Wl := utiltestingapi.MakeWorkload("cq2-wl", ns.Name).
+				Queue(kueue.LocalQueueName(q2.Name)).
+				Priority(lowPriority).
+				Request(corev1.ResourceCPU, "1").
+				Obj()
+			util.MustCreate(ctx, k8sClient, cq2Wl)
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, cq2Wl)
+
+			ginkgo.By("Creating a high-priority 4-CPU workload in the empty cq1: it doesn't fit and has no preemption candidates")
+			cq1Pending := utiltestingapi.MakeWorkload("cq1-pending-borrower", ns.Name).
+				Queue(kueue.LocalQueueName(q1.Name)).
+				Priority(highPriority).
+				Request(corev1.ResourceCPU, "4").
+				Obj()
+			util.MustCreate(ctx, k8sClient, cq1Pending)
+			util.ExpectWorkloadsToBePending(ctx, k8sClient, cq1Pending)
+
+			ginkgo.By("Creating a low-priority 1-CPU workload in cq3 that fits by borrowing the free cohort quota")
+			cq3Wl := utiltestingapi.MakeWorkload("cq3-borrower", ns.Name).
+				Queue(kueue.LocalQueueName(q3.Name)).
+				Priority(lowPriority).
+				Request(corev1.ResourceCPU, "1").
+				Obj()
+			util.MustCreate(ctx, k8sClient, cq3Wl)
+
+			ginkgo.By("Verifying the cq3 workload is admitted and cq1's workload stays pending")
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, cq3Wl)
+			util.ExpectWorkloadsToBePending(ctx, k8sClient, cq1Pending)
+		})
 	})
 
 	ginkgo.Context("In a cohort with StrictFIFO", func() {
