@@ -416,6 +416,95 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 		})
 	})
 
+	ginkgo.When("Preemptor is within nominal quota on the contested resource but borrows another resource", func() {
+		var (
+			cqP *kueue.ClusterQueue
+			cqW *kueue.ClusterQueue
+			cqY *kueue.ClusterQueue
+		)
+
+		ginkgo.BeforeEach(func() {
+			createCohort(utiltestingapi.MakeCohort("within-nominal-cohort").Obj())
+
+			// cq-p lends its idle cpu to the Cohort.
+			cqP = createQueue(utiltestingapi.MakeClusterQueue("cq-p-" + ns.Name).
+				Cohort("within-nominal-cohort").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(defaultFlavor.Name).
+					Resource(corev1.ResourceCPU, "4").
+					Resource(corev1.ResourceMemory, "2Gi").Obj()).
+				Preemption(kueue.ClusterQueuePreemption{
+					ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+				}).
+				Obj())
+
+			// cq-w has no quota, so everything it uses is borrowed.
+			cqW = createQueue(utiltestingapi.MakeClusterQueue("cq-w-" + ns.Name).
+				Cohort("within-nominal-cohort").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(defaultFlavor.Name).
+					Resource(corev1.ResourceCPU, "0").
+					Resource(corev1.ResourceMemory, "0").Obj()).
+				Obj())
+
+			// cq-y's large cpu quota makes borrowed cpu a small share of the
+			// Cohort's lendable cpu.
+			cqY = createQueue(utiltestingapi.MakeClusterQueue("cq-y-" + ns.Name).
+				Cohort("within-nominal-cohort").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(defaultFlavor.Name).
+					Resource(corev1.ResourceCPU, "20").
+					Resource(corev1.ResourceMemory, "0").Obj()).
+				Obj())
+
+			// cq-l only lends memory.
+			createQueue(utiltestingapi.MakeClusterQueue("cq-l-" + ns.Name).
+				Cohort("within-nominal-cohort").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(defaultFlavor.Name).
+					Resource(corev1.ResourceCPU, "0").
+					Resource(corev1.ResourceMemory, "10Gi").Obj()).
+				Obj())
+		})
+
+		ginkgo.It("should not re-admit the preempted workload ahead of its preemptor", func() {
+			ginkgo.By("Admitting y1, which uses all of cq-y's cpu, and w1, which borrows cq-p's idle cpu")
+			y1 := utiltestingapi.MakeWorkload("y1", ns.Name).
+				Queue(kueue.LocalQueueName(cqY.Name)).
+				Request(corev1.ResourceCPU, "20").
+				Obj()
+			behavioral.MustCreate(ctx, k8sClient, y1)
+			wls = append(wls, y1)
+			behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, y1)
+
+			w1 := utiltestingapi.MakeWorkload("w1", ns.Name).
+				Queue(kueue.LocalQueueName(cqW.Name)).
+				Request(corev1.ResourceCPU, "4").
+				Obj()
+			behavioral.MustCreate(ctx, k8sClient, w1)
+			wls = append(wls, w1)
+			behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, w1)
+
+			ginkgo.By("Creating p, which needs cq-p's nominal cpu and has to borrow memory")
+			p := utiltestingapi.MakeWorkload("p", ns.Name).
+				Queue(kueue.LocalQueueName(cqP.Name)).
+				Request(corev1.ResourceCPU, "4").
+				Request(corev1.ResourceMemory, "6Gi").
+				Obj()
+			behavioral.MustCreate(ctx, k8sClient, p)
+			wls = append(wls, p)
+
+			ginkgo.By("Waiting for p to reclaim its nominal cpu from w1, and finishing w1's eviction")
+			behavioral.ExpectWorkloadsToBePreempted(ctx, k8sClient, w1)
+			behavioral.FinishEvictionForWorkloads(ctx, k8sClient, w1)
+
+			ginkgo.By("Checking that p, not w1, gets the freed quota")
+			gomega.Eventually(func(g gomega.Gomega) {
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(w1), w1)).To(gomega.Succeed())
+				g.Expect(workload.HasQuotaReservation(w1)).To(gomega.BeFalse(),
+					"w1 was re-admitted ahead of p, which preempted it; p then preempts w1 again, and the cycle repeats")
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(p), p)).To(gomega.Succeed())
+				g.Expect(workload.HasQuotaReservation(p)).To(gomega.BeTrue(), "p should be admitted")
+			}, behavioral.Timeout, behavioral.Interval).Should(gomega.Succeed())
+		})
+	})
+
 	ginkgo.When("Preemption is enabled and CQs have 0 weight", func() {
 		var (
 			cqA *kueue.ClusterQueue
